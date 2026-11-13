@@ -43,7 +43,12 @@ def chamar_gemini(texto):
     )
     resposta.raise_for_status()
     return resposta.json()["candidates"][0]["content"]["parts"][0]["text"]
- 
+
+CHAMADAS = {"bmo": chamar_ollama, "gemini": chamar_gemini}
+
+
+def primeira_linha(erro):
+    return str(erro).splitlines()[0]
  
 def classificar(mensagem):
     inicio = time.perf_counter()
@@ -66,17 +71,31 @@ def main():
         if not mensagem:
             continue
  
-        destino, tempo_classificacao = classificar(mensagem)
-        print(f"[BMO classificou em {tempo_classificacao:.2f}s -> {destino}]")
- 
-        inicio = time.perf_counter()
-        if destino == "bmo":
-            resposta = chamar_ollama(mensagem)
-        else:
-            resposta = chamar_gemini(mensagem)
+        try:
+            destino, tempo_classificacao = classificar(mensagem)
+            print(f"[BMO classificou em {tempo_classificacao:.2f}s -> {destino}]")
+        except (httpx.HTTPError, KeyError) as erro:
+            destino = "gemini"
+            print(f"[BMO não conseguiu classificar: {primeira_linha(erro)} -> usando gemini]")
+
+        reserva = "gemini" if destino == "bmo" else "bmo"
+        resposta = None
+
+        for ia in (destino, reserva):
+            try:
+                inicio = time.perf_counter()
+                resposta = CHAMADAS[ia](mensagem)
+                break
+            except (httpx.HTTPError, KeyError) as erro:
+                print(f"[{ia} falhou: {primeira_linha(erro)}]")
+
+        if resposta is None:
+            print("\nNenhuma IA conseguiu responder. Tente de novo.")
+            continue
+
         tempo_resposta = time.perf_counter() - inicio
- 
-        print(f"\nvia {destino} ({tempo_resposta:.2f}s): {resposta}")
+        aviso = f", fallback porque {destino} falhou" if ia != destino else ""
+        print(f"\nvia {ia} ({tempo_resposta:.2f}s{aviso}): {resposta}")
  
  
 if __name__ == "__main__":
